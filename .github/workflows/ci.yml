@@ -30,8 +30,18 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Scan secrets (Gitleaks)
-        uses: gitleaks/gitleaks-action@v2
+      - name: Install Gitleaks
+        run: |
+          wget https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz
+          tar -xzf gitleaks_8.24.3_linux_x64.tar.gz
+          sudo mv gitleaks /usr/local/bin/
+
+      - name: Run Gitleaks
+        run: |
+          gitleaks detect \
+            --source . \
+            --redact \
+            --verbose
 
       - name: Set up Python
         uses: actions/setup-python@v5
