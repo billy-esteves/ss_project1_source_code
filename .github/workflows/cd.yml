@@ -1,10 +1,7 @@
 name: CD Pipeline
 
 on:
-  workflow_run:
-    workflows: ["CI Pipeline"]
-    types:
-      - completed
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -15,12 +12,10 @@ concurrency:
   group: cd-${{ github.ref }}
   cancel-in-progress: true
 
-
 jobs:
 
   # BUILD & PUSH IMAGES
   build-and-push:
-    if: ${{ github.event.workflow_run.event == 'push' }}
     name: Build & Push Images to GHCR
     runs-on: ubuntu-latest
 
@@ -93,7 +88,7 @@ jobs:
           docker network rm app-net || true
           docker network create app-net
 
-          # DB container (ALWAYS named "db" for consistency)
+          # DB container
           docker run -d \
             --name db \
             --network app-net \
@@ -189,7 +184,6 @@ jobs:
         uses: zaproxy/action-baseline@v0.15.0
         with:
           target: "http://localhost:8000"
-          
 
 
   # PRODUCTION DEPLOYMENT (MANUAL GATE)
