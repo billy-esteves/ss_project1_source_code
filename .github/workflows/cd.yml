@@ -1,8 +1,10 @@
 name: CD Pipeline
 
 on:
-  push:
-    branches: [main, dev, ci_cd_evidence_collection]
+  workflow_run:
+    workflows: ["CI Pipeline"]
+    types:
+      - completed
 
 permissions:
   contents: read

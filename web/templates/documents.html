@@ -14,14 +14,6 @@
       <button type="submit">Upload</button>
     </form>
   </div>
-  <div class="card">
-    <h2>Shared Documents</h2>
-    <a href="{{ url_for('shared_documents') }}" style="text-decoration: none;">
-      <button type="button" style="background-color: #1f3a5f; color: white; border: none; border-radius: 4px; cursor: pointer;">
-        View documents shared with me
-      </button>
-    </a>
-  </div>
 
   <div class="card">
     <h2>Documents</h2>
@@ -35,8 +27,6 @@
           <th>Filename</th>
           <th>Summary</th>
           <th>Full</th>
-          <th>Download</th>
-          <th>Share</th>
         </tr>
       </thead>
       <tbody>
@@ -50,22 +40,11 @@
               Summary
             </button>
           </td>
-          <td>
-            <a href="{{ url_for('document_details', document_id=doc.id) }}">
-              Details
-            </a>
-          </td>
-          <td>
-            <a href="{{ url_for('download_document', id=doc.id) }}">
-              Download
-            </a>
-          </td>
-          <td>
-            <form method="post" action="{{ url_for('share_document', document_id=doc.id) }}" style="display:flex; gap:5px; margin:0;">
-              <input type="number" name="shared_with" placeholder="ID np. 2" required style="width: 80px; padding: 0.3rem;">
-              <button type="submit" style="padding: 0.3rem 0.6rem;">Share</button>
-            </form>
-          </td>
+        <td>
+          <a href="{{ url_for('document_details', document_id=doc.id) }}">
+            Details
+          </a>
+        </td>
         </tr>
       {% endfor %}
       </tbody>

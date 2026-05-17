@@ -19,12 +19,8 @@
         <td>{% if user.is_disabled %}disabled{% else %}active{% endif %}</td>
         <td>
           {% if not user.is_disabled %}
-          <form method="post" action="{{ url_for('disable_user', id=user.id) }}">
+          <form method="post" action="{{ url_for('disable_user', user_id=user.id) }}">
             <button type="submit">Disable</button>
-          </form>
-          {% else %}
-          <form method="post" action="{{ url_for('enable_user', id=user.id) }}">
-            <button type="submit">Enable</button>
           </form>
           {% endif %}
         </td>

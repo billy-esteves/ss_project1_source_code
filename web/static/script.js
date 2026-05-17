@@ -11,7 +11,7 @@ document.addEventListener("DOMContentLoaded", () => {
           const li = document.createElement("li");
           li.className = "flash success";
 
-          li.textContent = `Document uploaded: ${title}`;
+          li.innerHTML = `Document uploaded: ${title}`;
 
           container.appendChild(li);
       }
@@ -42,7 +42,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     function updateField(element, value) {
-      element.textContent = "Title: " + value;
+      element.innerHTML = "Title: " + value;
     }
 
 });

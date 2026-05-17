@@ -8,25 +8,9 @@
 </head>
 <body>
   <header>
-    <h1>    
-      <a href="{{ url_for('documents_page') }}" style="text-decoration: none; color: inherit;">
-        Document Management Platform
-      </a>
-    </h1>
+    <h1>Document Management Platform</h1>
     {% if session.get('username') %}
-      <div class="userbox">
-        Logged in as <strong>{{ session.get('username') }}</strong>
-        {% if session.get("is_admin") %}
-           · 
-          <a href="{{ url_for('admin_get_users') }}">
-            User Management
-          </a>
-        {% endif %}
-         · 
-        <a href="{{ url_for('logout') }}">
-          Logout
-        </a>
-      </div>
+      <div class="userbox">Logged in as <strong>{{ session.get('username') }}</strong> · <a href="{{ url_for('logout') }}">Logout</a></div>
     {% endif %}
   </header>
 
