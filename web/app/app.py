@@ -28,6 +28,9 @@ from .logger_module import logger
 
 import datetime
 
+import tempfile
+from flask_session import Session
+
 dotenv.load_dotenv()
 
 BASE_DIR = pathlib.Path(__file__).resolve().parent.parent
@@ -90,6 +93,24 @@ def create_app():
 
     app.secret_key = os.getenv("SECRET_KEY", "dev-secret")
     app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
+
+    #harden session management with Flask-Session and secure cookie flags
+    
+    # Server-Side Session Configuration
+    app.config["SESSION_TYPE"] = "filesystem"
+    app.config["SESSION_FILE_DIR"] = tempfile.gettempdir()
+    app.config["SESSION_PERMANENT"] = False
+    
+    # 2. Secure Cookie Settings
+    secure_mode = os.getenv("SECURE_COOKIES", "True").lower() in ("true", "1", "t")
+    app.config.update(
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE='Lax',
+        SESSION_COOKIE_SECURE=secure_mode
+    )
+
+    # Enable Flask-Session
+    Session(app)
 
     register_routes(app)
 
