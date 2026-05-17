@@ -19,10 +19,12 @@ import flask  # type:ignore
 import psycopg2  # type:ignore
 from werkzeug.security import check_password_hash  # type:ignore
 from werkzeug.security import generate_password_hash  # type:ignore
-from werkzeug.utils import secure_filename
+from werkzeug.utils import secure_filename # type:ignore
 
 from . import db
 from . import utils
+
+from .logger_module import logger
 
 import datetime
 
@@ -82,6 +84,9 @@ def create_app():
         template_folder=str(BASE_DIR / "templates"),
         static_folder=str(BASE_DIR / "static"),
     )
+
+    log = logging.getLogger("werkzeug")
+    log.setLevel(logging.ERROR)
 
     app.secret_key = os.getenv("SECRET_KEY", "dev-secret")
     app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
@@ -191,6 +196,7 @@ def login_required(fn):
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
         if "user_id" not in flask.session:
+            logger.warning("Unauthorized access by logged out user")
             flask.flash("Please log in first.", "error")
             return flask.redirect(flask.url_for("login"))
         return fn(*args, **kwargs)
@@ -207,6 +213,7 @@ def admin_required(fn):
             return flask.redirect(flask.url_for("login"))
 
         if not flask.session.get("is_admin"):
+            logger.warning("Unauthorized access to admin function by user='%s'",flask.session.get("username"))
             flask.abort(403)
 
         return fn(*args, **kwargs)
@@ -269,15 +276,19 @@ def register_routes(app):
             user = db.get_user_by_username(cur, username)
             #* User: [0] id [1] username [2] password [3] is_disabled [4] is_admin [5] bad_attempts [6] locked_until
 
+            logger.info("Login attempt for username='%s'", username)
+
             # Check user exists
 
             if user is None:
+                logger.warning("Login failed. User '%s' does not exist in DB", username)
                 cur.close()
                 conn.close()
                 flask.flash("Invalid credentials.", "error")
                 return flask.render_template("login.html")
 
             if user [3]: # if is disabled
+                logger.warning("Login failed. User '%s' is disabled", username)
                 cur.close()
                 conn.close()
                 flask.flash("User is disabled.", "error")
@@ -294,6 +305,7 @@ def register_routes(app):
 
                 # Is it still locked?
                 if user[6] > now:
+                    logger.warning("User '%s' is locked out due to number of failed login attempts", username)
                     cur.close()
                     conn.close()
 
@@ -330,8 +342,12 @@ def register_routes(app):
                 cur.close()
                 conn.close()
 
+                logger.info("Sucessfully logged in username='%s'", username)
+
                 # Move to logged page
                 return flask.redirect(flask.url_for("documents_page"))
+            
+            logger.warning("Invalid password username='%s'", username)
 
             # Else give error
             flask.flash("Invalid credentials.", "error")
@@ -513,14 +529,12 @@ def register_routes(app):
         upload_folder = BASE_DIR / app.config["UPLOAD_FOLDER"]
         upload_folder.mkdir(parents=True, exist_ok=True)
 
-        #filename = utils.sanitize_filename(uploaded_file.filename)
-        #destination = upload_folder / uploaded_file.filename
-        # Replaced the above two lines with secure_filename to prevent
-        #directory traversal and other filename issues.
         filename = secure_filename(uploaded_file.filename)
         destination = upload_folder / filename
         uploaded_file.save(destination)
         metadata = extract_metadata(destination)
+
+        logger.info("Upload started user='%s' filename='%s'", flask.session.get("username"), filename)
 
         conn = get_db()
         cur = conn.cursor()
@@ -541,6 +555,8 @@ def register_routes(app):
             (user_id, title, filename, metadata),
         )
         conn.commit()
+
+        logger.info("Upload sucess user='%s' filename='%s'", flask.session.get("username"), filename)
 
         cur.close()
         conn.close()
@@ -566,6 +582,7 @@ def register_routes(app):
             """
             return {"status": "ok"}, 200
         except Exception:
+            logger.exception("Unhandled exception")
             return {"status": "error"}, 500
 
 
@@ -601,10 +618,13 @@ def register_routes(app):
         conn.close()
 
         if not row:
+            logger.warning("Unauthorized document access user='%s' doc_id='%s'",flask.session.get("username"),id)
             return "Document not found", 404
 
         filename = row[0]
         upload_folder = BASE_DIR / app.config["UPLOAD_FOLDER"]
+
+        logger.info("Document download user='%s' filename='%s'", flask.session.get("username"), filename)
 
         return flask.send_from_directory(upload_folder, filename, as_attachment=True)
 
@@ -637,10 +657,13 @@ def register_routes(app):
         conn.close()
 
         if not row:
+            logger.warning("Unauthorized shared document access user='%s' doc_id='%s'",flask.session.get("username"),id)
             return "Document not found", 404
 
         filename = row[0]
         upload_folder = BASE_DIR / app.config["UPLOAD_FOLDER"]
+
+        logger.info("Shared document download user='%s' filename='%s'", flask.session.get("username"), filename)
 
         return flask.send_from_directory(upload_folder, filename, as_attachment=True)
 
@@ -702,6 +725,8 @@ def register_routes(app):
         """, (document_id, shared_with_id))
         conn.commit()
 
+        logger.info("Document shared owner='%s' doc_id='%s' shared_with='%s'", flask.session.get("username"), document_id, shared_with_id)
+
         cur.close()
         conn.close()
         flask.flash("Document shared successfully.", "success")
@@ -761,6 +786,8 @@ def register_routes(app):
     @login_required
     @admin_required
     def admin_get_users():
+
+        logger.info("Admin panel accessed user='%s'", flask.session.get("username"))
 
         # Open DB connection
         conn = get_db()
@@ -836,6 +863,8 @@ def register_routes(app):
         # Commit update
         conn.commit()
 
+        logger.warning("User enabled by admin='%s' target_user_id='%s'", flask.session.get("username"), id)
+
         # Close connection
         cur.close()
         conn.close()
@@ -881,6 +910,8 @@ def register_routes(app):
 
         # Commit update
         conn.commit()
+
+        logger.warning("User disabled by admin='%s' target_user_id='%s'", flask.session.get("username"), id)
 
         # Close connection
         cur.close()
