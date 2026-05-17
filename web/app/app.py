@@ -19,10 +19,19 @@ import flask  # type:ignore
 import psycopg2  # type:ignore
 from werkzeug.security import check_password_hash  # type:ignore
 from werkzeug.security import generate_password_hash  # type:ignore
-from werkzeug.utils import secure_filename
+from werkzeug.utils import secure_filename # type:ignore
 
 from . import db
 from . import utils
+
+from .logger_module import logger
+
+import datetime
+
+import tempfile
+from flask_session import Session
+
+import magic
 
 dotenv.load_dotenv()
 
@@ -35,6 +44,33 @@ DB_PASSWORD = os.getenv("DB_PASSWORD", "postgres")
 DB_NAME = os.getenv("DB_NAME", "docdb")
 
 UPLOAD_FOLDER = "uploads"
+
+MAX_FAILED_ATTEMPTS = 3
+
+ALLOWED_EXTENSIONS = {"txt", "pdf", "docx", "xlsx", "pptx"}
+ALLOWED_MIME_TYPES = {
+    "text/plain",
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+}
+
+def allowed_file(filename):
+    """
+    Check if a filename has an allowed extension.
+
+    Args:
+        filename (str):
+            Name of the file to check.
+    Returns:
+        bool:
+            True if the file has an allowed extension, False otherwise.
+    """
+    return (
+        "." in filename
+        and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+    )
 
 
 def get_db():
@@ -81,6 +117,24 @@ def create_app():
 
     app.secret_key = os.getenv("SECRET_KEY", "dev-secret")
     app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
+
+    #harden session management with Flask-Session and secure cookie flags
+    
+    # Server-Side Session Configuration
+    app.config["SESSION_TYPE"] = "filesystem"
+    app.config["SESSION_FILE_DIR"] = tempfile.gettempdir()
+    app.config["SESSION_PERMANENT"] = False
+    
+    # 2. Secure Cookie Settings
+    secure_mode = os.getenv("SECURE_COOKIES", "True").lower() in ("true", "1", "t")
+    app.config.update(
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE='Lax',
+        SESSION_COOKIE_SECURE=secure_mode
+    )
+
+    # Enable Flask-Session
+    Session(app)
 
     register_routes(app)
 
@@ -187,6 +241,7 @@ def login_required(fn):
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
         if "user_id" not in flask.session:
+            logger.warning("Unauthorized access by logged out user")
             flask.flash("Please log in first.", "error")
             return flask.redirect(flask.url_for("login"))
         return fn(*args, **kwargs)
@@ -203,6 +258,7 @@ def admin_required(fn):
             return flask.redirect(flask.url_for("login"))
 
         if not flask.session.get("is_admin"):
+            logger.warning("Unauthorized access to admin function by user='%s'",flask.session.get("username"))
             flask.abort(403)
 
         return fn(*args, **kwargs)
@@ -263,38 +319,118 @@ def register_routes(app):
             cur = conn.cursor()
 
             user = db.get_user_by_username(cur, username)
-            #* Username [0] id [1] username [2] password [3] is_disabled [4] is_admin
+            #* User: [0] id [1] username [2] password [3] is_disabled [4] is_admin [5] bad_attempts [6] locked_until
 
-            cur.close()
-            conn.close()
+            logger.info("Login attempt for username='%s'", username)
 
-            # Added check for user cause IDE was cryin about it
+            # Check user exists
 
             if user is None:
+                logger.warning("Login failed. User '%s' does not exist in DB", username)
+                cur.close()
+                conn.close()
                 flask.flash("Invalid credentials.", "error")
                 return flask.render_template("login.html")
 
-            # logging.warning(user[2]) # Debug - Shows user password
-            # logging.warning(user[4]) # Debug - Shows if user is admin
-
             if user [3]: # if is disabled
+                logger.warning("Login failed. User '%s' is disabled", username)
+                cur.close()
+                conn.close()
                 flask.flash("User is disabled.", "error")
                 return flask.render_template("login.html")
+            
+            # logging.warning("Timestamp")
+            # logging.warning(user[6])
+            # logging.warning("Number of attempts")
+            # logging.warning(user[5])
 
-            # is_admin = user [4] # not needed anyways
+            
+            if user[6] is not None: # If it has timestamp
+                now = datetime.datetime.now()
+
+                # Is it still locked?
+                if user[6] > now:
+                    logger.warning("User '%s' is locked out due to number of failed login attempts", username)
+                    cur.close()
+                    conn.close()
+
+                    # Flash error
+                    flask.flash(
+                        "Too many login attempts. Try again later.",
+                        "error"
+                    )
+
+                    # Return to login
+                    return flask.render_template("login.html")
 
             #* Original condition: if user and (user[2] == password and not user[3]) or is_admin:
             #* Removed the password skip for admin and "None" verification cause it's above now."
 
+            # Password check
             if check_password_hash(user[2], password):
+                
+                # Auth good, reset locked timestamp to null
+                cur.execute("""
+                    UPDATE users
+                    SET bad_attempts = 0,
+                        locked_until = NULL
+                    WHERE username = %s""",
+                    (username,)
+                )
+                conn.commit()
+
                 flask.session.clear()
                 flask.session["user_id"] = user[0]
                 flask.session["username"] = user[1]
                 flask.session["is_admin"] = user[4]
-                return flask.redirect(flask.url_for("documents_page"))
 
+                cur.close()
+                conn.close()
+
+                logger.info("Sucessfully logged in username='%s'", username)
+
+                # Move to logged page
+                return flask.redirect(flask.url_for("documents_page"))
+            
+            logger.warning("Invalid password username='%s'", username)
+
+            # Else give error
             flask.flash("Invalid credentials.", "error")
 
+            # Update failed attempts
+            failed_attempts = user[5] + 1
+            locked_until = None
+
+            # If over limit
+            if failed_attempts >= MAX_FAILED_ATTEMPTS:
+                # Calculate timestamp
+                locked_until = (
+                    datetime.datetime.now()
+                    + datetime.timedelta(minutes=15)
+                )
+
+                # Return to 0
+                failed_attempts = 0
+
+            # Update DB info
+            cur.execute("""
+                UPDATE users
+                SET bad_attempts = %s,
+                    locked_until = %s
+                WHERE username = %s
+            """, (
+                failed_attempts,
+                locked_until,
+                username
+            ))
+
+            conn.commit()
+
+            cur.close()
+            conn.close()
+
+
+        # And move to login screen
         return flask.render_template("login.html")
 
     @app.route("/logout")
@@ -435,17 +571,29 @@ def register_routes(app):
             flask.flash("Please choose a file.", "error")
             return flask.redirect(flask.url_for("documents_page"))
 
+        if not allowed_file(uploaded_file.filename):
+            logger.warning("File upload with disallowed extension user='%s' filename='%s'", flask.session.get("username"), uploaded_file.filename)
+            flask.flash("File type not allowed.", "error")
+            return flask.redirect(flask.url_for("documents_page"))
+
+        file_bytes = uploaded_file.read(2048) # Read the first 2048 bytes for MIME type detection
+        uploaded_file.seek(0) # Reset file pointer after reading
+
+        mime_type = magic.from_buffer(file_bytes, mime=True)
+        if mime_type not in ALLOWED_MIME_TYPES:
+            logger.warning("File upload with disallowed MIME type user='%s' filename='%s' mime_type='%s'", flask.session.get("username"), uploaded_file.filename, mime_type)
+            flask.flash(f"Invalid file content. Detected: {mime_type}", "error")
+            return flask.redirect(flask.url_for("documents_page"))
+        
         upload_folder = BASE_DIR / app.config["UPLOAD_FOLDER"]
         upload_folder.mkdir(parents=True, exist_ok=True)
 
-        #filename = utils.sanitize_filename(uploaded_file.filename)
-        #destination = upload_folder / uploaded_file.filename
-        # Replaced the above two lines with secure_filename to prevent
-        #directory traversal and other filename issues.
         filename = secure_filename(uploaded_file.filename)
         destination = upload_folder / filename
         uploaded_file.save(destination)
         metadata = extract_metadata(destination)
+
+        logger.info("Upload started user='%s' filename='%s'", flask.session.get("username"), filename)
 
         conn = get_db()
         cur = conn.cursor()
@@ -466,6 +614,8 @@ def register_routes(app):
             (user_id, title, filename, metadata),
         )
         conn.commit()
+
+        logger.info("Upload sucess user='%s' filename='%s'", flask.session.get("username"), filename)
 
         cur.close()
         conn.close()
@@ -491,6 +641,7 @@ def register_routes(app):
             """
             return {"status": "ok"}, 200
         except Exception:
+            logger.exception("Unhandled exception")
             return {"status": "error"}, 500
 
 
@@ -526,10 +677,13 @@ def register_routes(app):
         conn.close()
 
         if not row:
+            logger.warning("Unauthorized document access user='%s' doc_id='%s'",flask.session.get("username"),id)
             return "Document not found", 404
 
         filename = row[0]
         upload_folder = BASE_DIR / app.config["UPLOAD_FOLDER"]
+
+        logger.info("Document download user='%s' filename='%s'", flask.session.get("username"), filename)
 
         return flask.send_from_directory(upload_folder, filename, as_attachment=True)
 
@@ -562,10 +716,13 @@ def register_routes(app):
         conn.close()
 
         if not row:
+            logger.warning("Unauthorized shared document access user='%s' doc_id='%s'",flask.session.get("username"),id)
             return "Document not found", 404
 
         filename = row[0]
         upload_folder = BASE_DIR / app.config["UPLOAD_FOLDER"]
+
+        logger.info("Shared document download user='%s' filename='%s'", flask.session.get("username"), filename)
 
         return flask.send_from_directory(upload_folder, filename, as_attachment=True)
 
@@ -627,6 +784,8 @@ def register_routes(app):
         """, (document_id, shared_with_id))
         conn.commit()
 
+        logger.info("Document shared owner='%s' doc_id='%s' shared_with='%s'", flask.session.get("username"), document_id, shared_with_id)
+
         cur.close()
         conn.close()
         flask.flash("Document shared successfully.", "success")
@@ -686,6 +845,8 @@ def register_routes(app):
     @login_required
     @admin_required
     def admin_get_users():
+
+        logger.info("Admin panel accessed user='%s'", flask.session.get("username"))
 
         # Open DB connection
         conn = get_db()
@@ -761,6 +922,8 @@ def register_routes(app):
         # Commit update
         conn.commit()
 
+        logger.warning("User enabled by admin='%s' target_user_id='%s'", flask.session.get("username"), id)
+
         # Close connection
         cur.close()
         conn.close()
@@ -806,6 +969,8 @@ def register_routes(app):
 
         # Commit update
         conn.commit()
+
+        logger.warning("User disabled by admin='%s' target_user_id='%s'", flask.session.get("username"), id)
 
         # Close connection
         cur.close()

@@ -26,7 +26,7 @@ def get_user_by_username(cur, username):
             if the user exists, otherwise None.
     """
     sql, params = utils.prepare_query(
-        "SELECT id, username, password, is_disabled, is_admin FROM users WHERE username=%s",
+        "SELECT id, username, password, is_disabled, is_admin, bad_attempts, locked_until FROM users WHERE username=%s",
         (username,)
     )
     cur.execute(sql, params)

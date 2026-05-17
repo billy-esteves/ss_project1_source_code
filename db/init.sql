@@ -3,7 +3,9 @@ CREATE TABLE users (
     username TEXT UNIQUE NOT NULL,
     password TEXT NOT NULL,
     is_disabled BOOLEAN DEFAULT FALSE,
-    is_admin BOOLEAN DEFAULT FALSE
+    is_admin BOOLEAN DEFAULT FALSE,
+    bad_attempts INT DEFAULT 0,
+    locked_until TIMESTAMP DEFAULT NULL
 );
 
 CREATE TABLE documents (

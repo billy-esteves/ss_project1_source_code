@@ -5,8 +5,11 @@ services:
       - "8000:8000"
     volumes:
       - ./web:/app
+      - ./logs:/app/logs
     depends_on:
       - db
+    environment:
+      - SECURE_COOKIES=False
 
   db:
     build: ./db
