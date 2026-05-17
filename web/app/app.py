@@ -88,9 +88,6 @@ def create_app():
         static_folder=str(BASE_DIR / "static"),
     )
 
-    log = logging.getLogger("werkzeug")
-    log.setLevel(logging.ERROR)
-
     app.secret_key = os.getenv("SECRET_KEY", "dev-secret")
     app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 
