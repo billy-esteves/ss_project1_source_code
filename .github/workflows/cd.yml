@@ -2,7 +2,7 @@ name: CD Pipeline
 
 on:
   push:
-    branches: [main, dev] # FOR DEMO PURPOSES, DEPLOY ON MAIN ONLY
+    branches: [main, dev, ci_cd_evidence_collection]
 
 permissions:
   contents: read

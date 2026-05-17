@@ -5,9 +5,9 @@ env:
 
 on:
   push:
-    branches: [dev]
+    branches: [dev, ci_cd_evidence_collection]
   pull_request:
-    branches: [dev]
+    branches: [dev, ci_cd_evidence_collection]
 
 concurrency:
   group: ci-${{ github.ref }}
