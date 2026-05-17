@@ -31,6 +31,8 @@ import datetime
 import tempfile
 from flask_session import Session
 
+import magic
+
 dotenv.load_dotenv()
 
 BASE_DIR = pathlib.Path(__file__).resolve().parent.parent
@@ -44,6 +46,31 @@ DB_NAME = os.getenv("DB_NAME", "docdb")
 UPLOAD_FOLDER = "uploads"
 
 MAX_FAILED_ATTEMPTS = 3
+
+ALLOWED_EXTENSIONS = {"txt", "pdf", "docx", "xlsx", "pptx"}
+ALLOWED_MIME_TYPES = {
+    "text/plain",
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+}
+
+def allowed_file(filename):
+    """
+    Check if a filename has an allowed extension.
+
+    Args:
+        filename (str):
+            Name of the file to check.
+    Returns:
+        bool:
+            True if the file has an allowed extension, False otherwise.
+    """
+    return (
+        "." in filename
+        and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+    )
 
 
 def get_db():
@@ -544,6 +571,20 @@ def register_routes(app):
             flask.flash("Please choose a file.", "error")
             return flask.redirect(flask.url_for("documents_page"))
 
+        if not allowed_file(uploaded_file.filename):
+            logger.warning("File upload with disallowed extension user='%s' filename='%s'", flask.session.get("username"), uploaded_file.filename)
+            flask.flash("File type not allowed.", "error")
+            return flask.redirect(flask.url_for("documents_page"))
+
+        file_bytes = uploaded_file.read(2048) # Read the first 2048 bytes for MIME type detection
+        uploaded_file.seek(0) # Reset file pointer after reading
+
+        mime_type = magic.from_buffer(file_bytes, mime=True)
+        if mime_type not in ALLOWED_MIME_TYPES:
+            logger.warning("File upload with disallowed MIME type user='%s' filename='%s' mime_type='%s'", flask.session.get("username"), uploaded_file.filename, mime_type)
+            flask.flash(f"Invalid file content. Detected: {mime_type}", "error")
+            return flask.redirect(flask.url_for("documents_page"))
+        
         upload_folder = BASE_DIR / app.config["UPLOAD_FOLDER"]
         upload_folder.mkdir(parents=True, exist_ok=True)
 
